@@ -1,0 +1,247 @@
+version: "3.8"
+
+
+networks:
+  traefik:
+    external: true
+
+volumes:
+  portainer-storage: {}
+  redis-storage: {}
+  prometheus-storage: {}
+  grafana-storage: {}
+
+services:
+  authelia:
+    container_name: authelia
+    image: authelia/authelia
+    restart: unless-stopped
+    depends_on:
+      - redis
+    expose:
+      - 9091
+    volumes:
+      - ./authelia:/config
+    networks:
+      - traefik
+    environment:
+      - TZ
+      - AUTHELIA_JWT_SECRET_FILE=/config/secrets/authelia_jwt
+      - AUTHELIA_SESSION_SECRET_FILE=/config/secrets/authelia_session
+      - AUTHELIA_NOTIFIER_SMTP_PASSWORD_FILE=/config/secrets/authelia_smtp
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.authelia.rule=Host(`login.${DOMAIN}`)"
+      - "traefik.http.routers.authelia.entrypoints=websecure"
+      - "traefik.http.routers.authelia.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.authelia.service=authelia-svc"
+      - "traefik.http.services.authelia-svc.loadbalancer.server.port=9091"
+      - "traefik.http.middlewares.authelia.forwardauth.address=http://authelia:9091/api/verify?rd=https://login.${DOMAIN}/"
+      - "traefik.http.middlewares.authelia.forwardauth.trustForwardHeader=true"
+      - "traefik.http.middlewares.authelia.forwardauth.authResponseHeaders=Remote-User, Remote-Groups, Remote-Name, Remote-Email"
+
+  redis:
+    container_name: authelia_redis
+    image: redis:alpine
+    restart: unless-stopped
+    expose:
+      - 6379
+    volumes:
+      - redis-storage:/data
+    networks:
+      - traefik
+    environment:
+      - TZ
+    labels:
+      - "traefik.enable=false"
+
+  traefik:
+    container_name: traefik
+    image: traefik:${TRAEFIKVERSION}
+    restart: unless-stopped
+    depends_on:
+      - authelia
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./traefik/acme.json:/acme.json
+      - ./traefik/traefik.yml:/etc/traefik/traefik.yml
+    networks:
+      - traefik
+    environment:
+      - TZ
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.traefik.rule=Host(`traefik.${DOMAIN}`)"
+      - "traefik.http.routers.traefik.entrypoints=websecure"
+      - "traefik.http.routers.traefik.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.traefik.service=api@internal"
+      - "traefik.http.routers.traefik.middlewares=authelia@docker"
+
+  portainer:
+    container_name: portainer
+    image: portainer/portainer-ce:latest
+    restart: unless-stopped
+    depends_on:
+      - traefik
+    command: -H unix:///var/run/docker.sock
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - portainer-storage:/data
+    networks:
+      - traefik
+    environment:
+      - TZ
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=traefik"
+      - "traefik.http.routers.portainer.rule=Host(`portainer.${DOMAIN}`)"
+      - "traefik.http.routers.portainer.entrypoints=websecure"
+      - "traefik.http.routers.portainer.tls.certresolver=letsencrypt"
+      - "traefik.http.services.portainer-svc.loadbalancer.server.port=9000"
+      - "traefik.http.routers.portainer-svc.service=portainer-svc"
+      - "traefik.http.routers.portainer.middlewares=authelia@docker"
+
+  helloworld:
+    container_name: helloworld
+    image: "pi/koa-hello-world:latest"
+    restart: unless-stopped
+    depends_on:
+      - traefik
+    environment:
+      - PORT=5000
+    networks:
+      - traefik
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.helloworld.rule=Host(`${DOMAIN}`)"
+      - "traefik.http.routers.helloworld.entrypoints=websecure"
+      - "traefik.http.routers.helloworld.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.helloworld.middlewares=authelia@docker"
+
+  homer:
+    container_name: homer
+    image: "b4bz/homer:latest"
+    restart: unless-stopped
+    depends_on:
+      - traefik
+    networks:
+      - traefik
+    # volumes:
+    #   - ./homer/:/www/assets
+    volumes:
+      - ./homer/config.yml:/www/assets/config.yml
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.homer.rule=Host(`home.${DOMAIN}`)"
+      - "traefik.http.routers.homer.entrypoints=websecure"
+      - "traefik.http.routers.homer.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.homer.middlewares=authelia@docker"
+      - "traefik.http.routers.homer-svc.service=homer-svc"
+      - "traefik.http.services.homer-svc.loadbalancer.server.port=8080"
+
+  prometheus:
+    container_name: prometheus
+    image: prom/prometheus:latest
+    restart: unless-stopped
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - "--storage.tsdb.path=/prometheus"
+      - '--web.console.libraries=/usr/share/prometheus/console_libraries'
+      - '--web.console.templates=/usr/share/prometheus/consoles'
+    volumes:
+      - ./prometheus/:/etc/prometheus/
+      - prometheus-storage:/prometheus
+    networks:
+      - traefik
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.prometheus.rule=Host(`prometheus.${DOMAIN}`)"
+      - "traefik.http.routers.prometheus.entrypoints=websecure"
+      - "traefik.http.routers.prometheus.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.prometheus.middlewares=authelia@docker"
+      - "traefik.http.routers.prometheus-svc.service=prometheus-svc"
+      - "traefik.http.services.prometheus-svc.loadbalancer.server.port=9090"
+
+  # alertmanager:
+  #   container_name: alertmanager
+  #   image: prom/alertmanager:latest
+  #   restart: unless-stopped
+  #   command:
+  #     - '--config.file=/etc/alertmanager/alertmanager.yml'
+  #     - '--storage.path=/alertmanager'
+  #   volumes:
+  #     - ./alertmanager/:/etc/alertmanager/
+  #   networks:
+  #     - traefik
+  #   labels:
+  #     - "traefik.enable=true"
+  #     - "traefik.http.routers.alertmanager.rule=Host(`alerts.${DOMAIN}`)"
+  #     - "traefik.http.routers.alertmanager.entrypoints=websecure"
+  #     - "traefik.http.routers.alertmanager.tls.certresolver=letsencrypt"
+  #     - "traefik.http.routers.alertmanager.middlewares=authelia@docker"
+  #     - "traefik.http.routers.alertmanager-svc.service=alertmanager-svc"
+  #     - "traefik.http.services.alertmanager-svc.loadbalancer.server.port=9093"
+
+  nodeexporter:
+    container_name: nodeexporter
+    image: prom/node-exporter:latest
+    restart: unless-stopped
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+    command:
+      - '--path.procfs=/host/proc'
+      - '--path.rootfs=/rootfs'
+      - '--path.sysfs=/host/sys'
+      - '--collector.filesystem.ignored-mount-points=^/(sys|proc|dev|host|etc)($$|/)'
+    expose:
+      - 9100
+    networks:
+      - traefik
+    labels:
+      - "traefik.enable=false"
+
+  grafana:
+    container_name: grafana
+    image: grafana/grafana:latest
+    restart: unless-stopped
+    depends_on:
+      - prometheus
+    volumes:
+      - grafana-storage:/var/lib/grafana
+    networks:
+      - traefik
+    environment:
+      - GF_SECURITY_ADMIN_USER=${GRAFANAUSER}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANAPASSWORD}
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_LOG_LEVEL='debug'
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.grafana.rule=Host(`grafana.${DOMAIN}`)"
+      - "traefik.http.routers.grafana.entrypoints=websecure"
+      - "traefik.http.routers.grafana.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.grafana.middlewares=authelia@docker"
+      - "traefik.http.routers.grafana-svc.service=grafana-svc"
+      - "traefik.http.services.grafana-svc.loadbalancer.server.port=3000"
+
+  dozzle:
+    container_name: dozzle
+    image: amir20/dozzle:latest
+    restart: unless-stopped
+    networks:
+      - traefik
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.dozzle.rule=Host(`dozzle.${DOMAIN}`)"
+      - "traefik.http.routers.dozzle.entrypoints=websecure"
+      - "traefik.http.routers.dozzle.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.dozzle.middlewares=authelia@docker"
+      - "traefik.http.routers.dozzle-svc.service=dozzle-svc"
+      - "traefik.http.services.dozzle-svc.loadbalancer.server.port=8080"

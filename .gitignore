@@ -1,0 +1,8 @@
+.env
+
+/authelia/**
+!/authelia/example-configuration.yml
+!/authelia/example-users_database.yml
+/traefik/**
+!/traefik/example-acme.json
+!/traefik/example-traefik.yml

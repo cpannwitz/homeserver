@@ -1,0 +1,93 @@
+################################################################
+#
+# Configuration sample for Traefik v2.
+#
+#
+################################################################
+
+################################################################
+# Global configuration
+################################################################
+global:
+  checkNewVersion: true
+  sendAnonymousUsage: false
+
+################################################################
+# EntryPoints configuration
+################################################################
+
+# EntryPoints definition
+entryPoints:
+  web:
+    address: :80
+    http:
+      redirections:
+        entrypoint:
+          to: websecure
+          scheme: https
+          permanent: true
+
+  websecure:
+    address: :443
+
+################################################################
+# API and dashboard configuration
+################################################################
+
+# Enable API and dashboard
+api:
+  # Enable the API in insecure mode
+  insecure: true
+
+  # Enabled Dashboard
+  dashboard: true
+
+################################################################
+# Logs configuration
+################################################################
+
+# Enable logging
+log:
+  level: PANIC
+accessLog: {}
+
+################################################################
+# Metrics configuration
+################################################################
+
+# Enable metrics
+metrics:
+  prometheus: {}
+
+################################################################
+# Ping configuration
+################################################################
+
+# Enable ping
+ping: {}
+
+################################################################
+# Docker configuration backend
+################################################################
+
+providers:
+  # Enable Docker configuration backend
+  docker:
+    # Docker server endpoint. Can be a tcp or a unix socket endpoint.
+    endpoint: "unix:///var/run/docker.sock"
+
+    # default container access via name
+    # defaultRule: "Host(`{{ normalize .Name }}.domain.com`)"
+
+    # Expose containers by default in traefik
+    # exposedByDefault: true
+
+    # Default docker network for all services
+    network: traefik
+
+certificatesResolvers:
+  letsencrypt:
+    acme:
+      email: yourown@email.com
+      storage: acme.json
+      tlschallenge: true
