@@ -12,6 +12,11 @@ volumes:
   grafana-storage: {}
 
 services:
+
+# ========================================================================= #
+#                                 AUTHENTICATION
+# ========================================================================= #
+
   authelia:
     container_name: authelia
     image: authelia/authelia
@@ -55,6 +60,10 @@ services:
     labels:
       - "traefik.enable=false"
 
+# ========================================================================= #
+#                                 REVERSE PROXY
+# ========================================================================= #
+
   traefik:
     container_name: traefik
     image: traefik:${TRAEFIKVERSION}
@@ -80,67 +89,9 @@ services:
       - "traefik.http.routers.traefik.service=api@internal"
       - "traefik.http.routers.traefik.middlewares=authelia@docker"
 
-  portainer:
-    container_name: portainer
-    image: portainer/portainer-ce:latest
-    restart: unless-stopped
-    depends_on:
-      - traefik
-    command: -H unix:///var/run/docker.sock
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-      - portainer-storage:/data
-    networks:
-      - traefik
-    environment:
-      - TZ
-    labels:
-      - "traefik.enable=true"
-      - "traefik.docker.network=traefik"
-      - "traefik.http.routers.portainer.rule=Host(`portainer.${DOMAIN}`)"
-      - "traefik.http.routers.portainer.entrypoints=websecure"
-      - "traefik.http.routers.portainer.tls.certresolver=letsencrypt"
-      - "traefik.http.services.portainer-svc.loadbalancer.server.port=9000"
-      - "traefik.http.routers.portainer-svc.service=portainer-svc"
-      - "traefik.http.routers.portainer.middlewares=authelia@docker"
-
-  helloworld:
-    container_name: helloworld
-    image: "pi/koa-hello-world:latest"
-    restart: unless-stopped
-    depends_on:
-      - traefik
-    environment:
-      - PORT=5000
-    networks:
-      - traefik
-    labels:
-      - "traefik.enable=true"
-      - "traefik.http.routers.helloworld.rule=Host(`${DOMAIN}`)"
-      - "traefik.http.routers.helloworld.entrypoints=websecure"
-      - "traefik.http.routers.helloworld.tls.certresolver=letsencrypt"
-      - "traefik.http.routers.helloworld.middlewares=authelia@docker"
-
-  homer:
-    container_name: homer
-    image: "b4bz/homer:latest"
-    restart: unless-stopped
-    depends_on:
-      - traefik
-    networks:
-      - traefik
-    # volumes:
-    #   - ./homer/:/www/assets
-    volumes:
-      - ./homer/config.yml:/www/assets/config.yml
-    labels:
-      - "traefik.enable=true"
-      - "traefik.http.routers.homer.rule=Host(`home.${DOMAIN}`)"
-      - "traefik.http.routers.homer.entrypoints=websecure"
-      - "traefik.http.routers.homer.tls.certresolver=letsencrypt"
-      - "traefik.http.routers.homer.middlewares=authelia@docker"
-      - "traefik.http.routers.homer-svc.service=homer-svc"
-      - "traefik.http.services.homer-svc.loadbalancer.server.port=8080"
+# ========================================================================= #
+#                                 MONITORING
+# ========================================================================= #
 
   prometheus:
     container_name: prometheus
@@ -209,19 +160,66 @@ services:
       - "traefik.http.routers.grafana-svc.service=grafana-svc"
       - "traefik.http.services.grafana-svc.loadbalancer.server.port=3000"
 
-  dozzle:
-    container_name: dozzle
-    image: amir20/dozzle:latest
+# ========================================================================= #
+#                                 SERVICES
+# ========================================================================= #
+
+  portainer:
+    container_name: portainer
+    image: portainer/portainer-ce:latest
     restart: unless-stopped
+    depends_on:
+      - traefik
+    command: -H unix:///var/run/docker.sock
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - portainer-storage:/data
+    networks:
+      - traefik
+    environment:
+      - TZ
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=traefik"
+      - "traefik.http.routers.portainer.rule=Host(`portainer.${DOMAIN}`)"
+      - "traefik.http.routers.portainer.entrypoints=websecure"
+      - "traefik.http.routers.portainer.tls.certresolver=letsencrypt"
+      - "traefik.http.services.portainer-svc.loadbalancer.server.port=9000"
+      - "traefik.http.routers.portainer-svc.service=portainer-svc"
+      - "traefik.http.routers.portainer.middlewares=authelia@docker"
+
+  helloworld:
+    container_name: helloworld
+    image: "pi/koa-hello-world:latest"
+    restart: unless-stopped
+    depends_on:
+      - traefik
+    environment:
+      - PORT=5000
+    networks:
+      - traefik
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.helloworld.rule=Host(`${DOMAIN}`)"
+      - "traefik.http.routers.helloworld.entrypoints=websecure"
+      - "traefik.http.routers.helloworld.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.helloworld.middlewares=authelia@docker"
+
+  homer:
+    container_name: homer
+    image: "b4bz/homer:latest"
+    restart: unless-stopped
+    depends_on:
+      - traefik
     networks:
       - traefik
     volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
+      - ./homer/config.yml:/www/assets/config.yml
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.dozzle.rule=Host(`dozzle.${DOMAIN}`)"
-      - "traefik.http.routers.dozzle.entrypoints=websecure"
-      - "traefik.http.routers.dozzle.tls.certresolver=letsencrypt"
-      - "traefik.http.routers.dozzle.middlewares=authelia@docker"
-      - "traefik.http.routers.dozzle-svc.service=dozzle-svc"
-      - "traefik.http.services.dozzle-svc.loadbalancer.server.port=8080"
+      - "traefik.http.routers.homer.rule=Host(`home.${DOMAIN}`)"
+      - "traefik.http.routers.homer.entrypoints=websecure"
+      - "traefik.http.routers.homer.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.homer.middlewares=authelia@docker"
+      - "traefik.http.routers.homer-svc.service=homer-svc"
+      - "traefik.http.services.homer-svc.loadbalancer.server.port=8080"
