@@ -9,7 +9,7 @@
 # Global configuration
 ################################################################
 global:
-  checkNewVersion: true
+  checkNewVersion: false
   sendAnonymousUsage: false
 
 ################################################################
@@ -37,7 +37,7 @@ entryPoints:
 # Enable API and dashboard
 api:
   # Enable the API in insecure mode
-  insecure: true
+  # insecure: true
 
   # Enabled Dashboard
   dashboard: true
@@ -50,6 +50,8 @@ api:
 log:
   level: PANIC
 accessLog: {}
+# accessLog:
+#   filePath: "/var/log/traefik/access.log"
 
 ################################################################
 # Metrics configuration
@@ -81,6 +83,13 @@ providers:
 
     # Expose containers by default in traefik
     # exposedByDefault: true
+
+    # # Enables the Swarm Mode (instead of standalone Docker).
+    # swarmMode: true
+    # # Defines the polling interval (in seconds) for Swarm Mode
+    # swarmModeRefreshSeconds: 15
+    # # Watch Docker Swarm events.
+    # watch: true
 
     # Default docker network for all services
     network: traefik
