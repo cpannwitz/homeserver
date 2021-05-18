@@ -13,5 +13,4 @@
 /alertmanager/**
 !/alertmanager/example-config.yml
 
-/grocy/**
 /ghost/**
