@@ -26,7 +26,7 @@ services:
   authelia:
     container_name: authelia
     image: authelia/authelia
-    user: "${UID}:${GID}"
+    user: "${PUID}:${PGID}"
     restart: unless-stopped
     depends_on:
       - autheliapg
@@ -201,7 +201,7 @@ services:
     container_name: grafana
     image: grafana/grafana:latest
     restart: unless-stopped
-    user: "${UID}:${GID}"
+    user: "${PUID}:${PGID}"
     depends_on:
       - prometheus
       - traefik
