@@ -1,0 +1,56 @@
+version: "3.8"
+
+networks:
+  traefik:
+    external: true
+  ghost:
+    external: true
+
+volumes:
+  ghostdb-storage: {}
+
+services:
+  # ========================================================================= #
+  #                                 GHOST BLOG
+  # ========================================================================= #
+
+  ghost:
+    container_name: ghost
+    image: ghost:4-alpine
+    restart: unless-stopped
+    depends_on:
+      - traefik
+      - ghostdb
+    networks:
+      - traefik
+      - ghost
+    environment:
+      - TZ=${TZ}
+      - url="https://blog.${DOMAIN}"
+      - database__client=mysql
+      - database__connection__host=ghostdb
+      - database__connection__database=${GHOSTDB_DB}
+      - database__connection__user=${GHOSTDB_USER}
+      - database__connection__password=${GHOSTDB_PASSWORD}
+    volumes:
+      - ./ghost:/var/lib/ghost/content
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.ghost.rule=Host(`blog.${DOMAIN}`)"
+      - "traefik.http.routers.ghost.entrypoints=websecure"
+      - "traefik.http.routers.ghost.tls.certresolver=letsencrypt"
+      - "traefik.http.services.ghost.loadbalancer.server.port=2368"
+
+  ghostdb:
+    container_name: ghostdb
+    image: mariadb:10.5
+    restart: unless-stopped
+    networks:
+      - ghost
+    environment:
+      - MYSQL_ROOT_PASSWORD=${GHOSTDB_PASSWORD}
+      - MYSQL_USER=${GHOSTDB_USER}
+      - MYSQL_PASSWORD=${GHOSTDB_PASSWORD}
+      - MYSQL_DATABASE=${GHOSTDB_DB}
+    volumes:
+      - ghostdb-storage:/var/lib/mysql

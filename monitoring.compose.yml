@@ -1,0 +1,160 @@
+version: "3.8"
+
+networks:
+  traefik:
+    external: true
+  monitoring:
+    external: true
+
+volumes:
+  prometheus-storage: {}
+  grafana-storage: {}
+  alertmanager-storage: {}
+
+services:
+  # ========================================================================= #
+  #                                 MONITORING
+  # ========================================================================= #
+
+  prometheus:
+    container_name: prometheus
+    image: prom/prometheus:v2.26.0
+    restart: unless-stopped
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--storage.tsdb.retention.time=60d"
+      - "--storage.tsdb.retention.size=10GB"
+      - "--web.console.libraries=/usr/share/prometheus/console_libraries"
+      - "--web.console.templates=/usr/share/prometheus/consoles"
+      - "--log.level=debug"
+    volumes:
+      - ./prometheus/:/etc/prometheus/
+      - prometheus-storage:/prometheus
+    networks:
+      - traefik
+      - monitoring
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.prometheus.rule=Host(`prometheus.${DOMAIN}`)"
+      - "traefik.http.routers.prometheus.entrypoints=websecure"
+      - "traefik.http.routers.prometheus.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.prometheus.middlewares=authelia@docker"
+      - "traefik.http.services.prometheus.loadbalancer.server.port=9090"
+
+  nodeexporter:
+    container_name: nodeexporter
+    image: prom/node-exporter:v1.1.2
+    restart: unless-stopped
+    command:
+      - "--path.procfs=/host/proc"
+      - "--path.rootfs=/rootfs"
+      - "--path.sysfs=/host/sys"
+      - "--collector.filesystem.ignored-mount-points=^/(sys|proc|dev|host|etc)($$|/)"
+      - "--log.level=debug"
+    networks:
+      - monitoring
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+
+  cadvisor:
+    container_name: cadvisor
+    image: zcube/cadvisor:v0.37.5
+    restart: unless-stopped
+    networks:
+      - monitoring
+    environment:
+      - TZ=${TZ}
+    command:
+      - "--housekeeping_interval=10s"
+      - "--docker_only=true"
+      - "--logtostderr=true"
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.cadvisor.rule=Host(`cadvisor.${DOMAIN}`)"
+      - "traefik.http.routers.cadvisor.entrypoints=websecure"
+      - "traefik.http.routers.cadvisor.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.cadvisor.middlewares=authelia@docker"
+      - "traefik.http.services.cadvisor.loadbalancer.server.port=8080"
+    # see: https://github.com/google/cadvisor/issues/2150
+    # privileged: true
+    devices:
+      - /dev/kmsg:/dev/kmsg
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:rw
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /dev/disk/:/dev/disk:ro
+
+  blackbox:
+    container_name: blackbox
+    image: prom/blackbox-exporter:v0.19.0
+    restart: unless-stopped
+    command:
+      - "--config.file=/etc/prometheus/blackbox.yml"
+      - "--log.level=debug"
+    networks:
+      - monitoring
+    volumes:
+      - ./prometheus/:/etc/prometheus/
+
+  alertmanager:
+    container_name: alertmanager
+    image: prom/alertmanager:v0.22.0-rc.1
+    restart: unless-stopped
+    command:
+      - "--config.file=/etc/alertmanager/config.yml"
+      - "--storage.path=/alertmanager"
+    volumes:
+      - alertmanager-storage:/alertmanager
+      - ./alertmanager:/etc/alertmanager
+    networks:
+      - traefik
+      - monitoring
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.alertmanager.rule=Host(`alertmanager.${DOMAIN}`)"
+      - "traefik.http.routers.alertmanager.entrypoints=websecure"
+      - "traefik.http.routers.alertmanager.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.alertmanager.middlewares=authelia@docker"
+      - "traefik.http.services.alertmanager.loadbalancer.server.port=9093"
+
+  alertmanager-discord:
+    # amd64 image
+    # image: benjojo/alertmanager-discord
+    # arm64 image (RPi)
+    image: rogerrum/alertmanager-discord:1.0.0
+    environment:
+      - DISCORD_WEBHOOK=${DISCORD_WEBHOOK}
+    networks:
+      - monitoring
+
+  grafana:
+    container_name: grafana
+    image: grafana/grafana:7.5.6
+    restart: unless-stopped
+    user: "${PUID}:${PGID}"
+    depends_on:
+      - prometheus
+      - traefik
+    volumes:
+      - grafana-storage:/var/lib/grafana
+      - ./grafana:/etc/grafana
+    networks:
+      - traefik
+      - monitoring
+    environment:
+      - TZ=${TZ}
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_LOG_LEVEL=debug
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.grafana.rule=Host(`grafana.${DOMAIN}`)"
+      - "traefik.http.routers.grafana.entrypoints=websecure"
+      - "traefik.http.routers.grafana.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.grafana.middlewares=authelia@docker"
+      - "traefik.http.services.grafana.loadbalancer.server.port=3000"
