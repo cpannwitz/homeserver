@@ -19,9 +19,9 @@ volumes:
   ghostdb-storage: {}
 
 services:
-# ========================================================================= #
-#                                 AUTHENTICATION
-# ========================================================================= #
+  # ========================================================================= #
+  #                                 AUTHENTICATION
+  # ========================================================================= #
 
   authelia:
     container_name: authelia
@@ -79,9 +79,9 @@ services:
     environment:
       - TZ
 
-# ========================================================================= #
-#                                 REVERSE PROXY
-# ========================================================================= #
+  # ========================================================================= #
+  #                                 REVERSE PROXY
+  # ========================================================================= #
 
   traefik:
     container_name: traefik
@@ -109,19 +109,19 @@ services:
       - "traefik.http.routers.traefik.service=api@internal"
       - "traefik.http.routers.traefik.middlewares=authelia@docker"
 
-# ========================================================================= #
-#                                 MONITORING
-# ========================================================================= #
+  # ========================================================================= #
+  #                                 MONITORING
+  # ========================================================================= #
 
   prometheus:
     container_name: prometheus
     image: prom/prometheus:latest
     restart: unless-stopped
     command:
-      - '--config.file=/etc/prometheus/prometheus.yml'
+      - "--config.file=/etc/prometheus/prometheus.yml"
       - "--storage.tsdb.path=/prometheus"
-      - '--web.console.libraries=/usr/share/prometheus/console_libraries'
-      - '--web.console.templates=/usr/share/prometheus/consoles'
+      - "--web.console.libraries=/usr/share/prometheus/console_libraries"
+      - "--web.console.templates=/usr/share/prometheus/consoles"
     volumes:
       - ./prometheus/:/etc/prometheus/
       - prometheus-storage:/prometheus
@@ -142,8 +142,8 @@ services:
     image: prom/alertmanager:latest
     restart: unless-stopped
     command:
-      - '--config.file=/etc/alertmanager/config.yml'
-      - '--storage.path=/alertmanager'
+      - "--config.file=/etc/alertmanager/config.yml"
+      - "--storage.path=/alertmanager"
     volumes:
       - ./alertmanager:/etc/alertmanager
     networks:
@@ -163,10 +163,10 @@ services:
     image: prom/node-exporter:latest
     restart: unless-stopped
     command:
-      - '--path.procfs=/host/proc'
-      - '--path.rootfs=/rootfs'
-      - '--path.sysfs=/host/sys'
-      - '--collector.filesystem.ignored-mount-points=^/(sys|proc|dev|host|etc)($$|/)'
+      - "--path.procfs=/host/proc"
+      - "--path.rootfs=/rootfs"
+      - "--path.sysfs=/host/sys"
+      - "--collector.filesystem.ignored-mount-points=^/(sys|proc|dev|host|etc)($$|/)"
     networks:
       - monitoring
     volumes:
@@ -225,9 +225,9 @@ services:
       - "traefik.http.routers.grafana-svc.service=grafana-svc"
       - "traefik.http.services.grafana-svc.loadbalancer.server.port=3000"
 
-# ========================================================================= #
-#                                 SERVICES
-# ========================================================================= #
+  # ========================================================================= #
+  #                                 SERVICES
+  # ========================================================================= #
 
   portainer:
     container_name: portainer
