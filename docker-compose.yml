@@ -1,0 +1,338 @@
+version: "3.8"
+
+networks:
+  traefik:
+    external: true
+  authelia:
+    external: true
+  monitoring:
+    external: true
+  ghost:
+    external: true
+
+volumes:
+  traefik-storage: {}
+  autheliaredis-storage: {}
+  autheliapg-storage: {}
+  prometheus-storage: {}
+  grafana-storage: {}
+  alertmanager-storage: {}
+  ghostdb-storage: {}
+
+services:
+  # ========================================================================= #
+  #                                 DDCLIENT
+  # ========================================================================= #
+  ddclient:
+    container_name: ddclient
+    image: linuxserver/ddclient:v3.9.1-ls57
+    restart: unless-stopped
+    volumes:
+      - ./ddclient/ddclient.conf:/config/ddclient.conf
+    environment:
+      PUID: ${PUID}
+      PGID: ${PGID}
+
+  # ========================================================================= #
+  #                                 REVERSE PROXY
+  # ========================================================================= #
+
+  traefik:
+    container_name: traefik
+    image: traefik:v2.4
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:80"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - traefik-storage:/certificates
+    networks:
+      - traefik
+    environment:
+      - TZ=${TZ}
+    command:
+      # Enable API + dashboard
+      - --api.dashboard=true
+      - --api.debug=true
+      # Set log level (DEBUG, PANIC, FATAL, ERROR, WARN, INFO)
+      - --log.level=PANIC
+      # Enable metrics
+      - --metrics.prometheus=true
+      - --ping=true
+      # Enable correct usage of timezone for logs
+      - --accesslog.fields.names.StartUTC=drop
+      # Docker settings
+      - --providers.docker.exposedbydefault=false
+      # - --providers.docker.swarmmode=true
+      - --providers.docker.network=traefik
+      # Entrypoints http/https + redirection to  https
+      - --entrypoints.web.address=:80
+      - --entrypoints.web.http.redirections.entrypoint.to=websecure
+      - --entrypoints.web.http.redirections.entryPoint.scheme=https
+      - --entrypoints.web.http.redirections.entrypoint.permanent=true
+      - --entrypoints.websecure.address=:443
+      # LetsEncrypt certificates settings
+      - --certificatesresolvers.letsencrypt.acme.email=${ACME_EMAIL}
+      - --certificatesresolvers.letsencrypt.acme.storage=/certificates/acme.json
+      - --certificatesresolvers.letsencrypt.acme.tlschallenge=true
+      # Enable LetsEncrypt staging server
+      - --certificatesresolvers.letsencrypt.acme.caserver=https://acme-staging-v02.api.letsencrypt.org/directory
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.traefik.rule=Host(`traefik.${DOMAIN}`)"
+      - "traefik.http.routers.traefik.entrypoints=websecure"
+      - "traefik.http.routers.traefik.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.traefik.service=api@internal"
+      - "traefik.http.routers.traefik.middlewares=authelia@docker"
+
+  # ========================================================================= #
+  #                                 AUTHENTICATION
+  # ========================================================================= #
+
+  authelia:
+    container_name: authelia
+    image: authelia/authelia:4.29
+    user: "${PUID}:${PGID}"
+    restart: unless-stopped
+    depends_on:
+      - autheliapg
+      - autheliaredis
+    volumes:
+      - ./authelia:/config
+    networks:
+      - traefik
+      - authelia
+    environment:
+      - TZ=${TZ}
+      - AUTHELIA_JWT_SECRET_FILE=/config/secrets/authelia_jwt
+      - AUTHELIA_SESSION_SECRET_FILE=/config/secrets/authelia_session
+      - AUTHELIA_NOTIFIER_SMTP_PASSWORD_FILE=/config/secrets/authelia_smtp
+      - AUTHELIA_STORAGE_POSTGRES_PASSWORD_FILE=/config/secrets/authelia_postgres
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.authelia.rule=Host(`login.${DOMAIN}`)"
+      - "traefik.http.routers.authelia.entrypoints=websecure"
+      - "traefik.http.routers.authelia.tls.certresolver=letsencrypt"
+      - "traefik.http.services.authelia.loadbalancer.server.port=9091"
+      # Custom Authelia_Traefik-Labels forwarding auth headers information
+      - "traefik.http.middlewares.authelia.forwardauth.address=http://authelia:9091/api/verify?rd=https://login.${DOMAIN}/"
+      - "traefik.http.middlewares.authelia.forwardauth.trustForwardHeader=true"
+      - "traefik.http.middlewares.authelia.forwardauth.authResponseHeaders=Remote-User, Remote-Groups, Remote-Name, Remote-Email"
+
+  autheliapg:
+    container_name: autheliapg
+    image: postgres:13.3-alpine
+    restart: unless-stopped
+    volumes:
+      - autheliapg-storage:/var/lib/postgresql/data
+    networks:
+      - authelia
+    environment:
+      - TZ=${TZ}
+      - POSTGRES_PASSWORD=${AUTHELIA_PG_PASSWORD}
+      - POSTGRES_USER=authelia
+      - POSTGRES_DB=authelia
+
+  autheliaredis:
+    container_name: autheliaredis
+    image: redis:6.2.3-alpine
+    restart: unless-stopped
+    volumes:
+      - autheliaredis-storage:/data
+    networks:
+      - authelia
+    environment:
+      - TZ=${TZ}
+
+  # ========================================================================= #
+  #                                 MONITORING
+  # ========================================================================= #
+
+  prometheus:
+    container_name: prometheus
+    image: prom/prometheus:v2.26.0
+    restart: unless-stopped
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--storage.tsdb.retention.time=60d"
+      - "--storage.tsdb.retention.size=10GB"
+      - "--web.console.libraries=/usr/share/prometheus/console_libraries"
+      - "--web.console.templates=/usr/share/prometheus/consoles"
+      - "--log.level=debug"
+    volumes:
+      - ./prometheus/:/etc/prometheus/
+      - prometheus-storage:/prometheus
+    networks:
+      - traefik
+      - monitoring
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.prometheus.rule=Host(`prometheus.${DOMAIN}`)"
+      - "traefik.http.routers.prometheus.entrypoints=websecure"
+      - "traefik.http.routers.prometheus.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.prometheus.middlewares=authelia@docker"
+      - "traefik.http.services.prometheus.loadbalancer.server.port=9090"
+
+  nodeexporter:
+    container_name: nodeexporter
+    image: prom/node-exporter:v1.1.2
+    restart: unless-stopped
+    command:
+      - "--path.procfs=/host/proc"
+      - "--path.rootfs=/rootfs"
+      - "--path.sysfs=/host/sys"
+      - "--collector.filesystem.ignored-mount-points=^/(sys|proc|dev|host|etc)($$|/)"
+      - "--log.level=debug"
+    networks:
+      - monitoring
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+
+  cadvisor:
+    container_name: cadvisor
+    image: zcube/cadvisor:v0.37.5
+    restart: unless-stopped
+    networks:
+      - monitoring
+    environment:
+      - TZ=${TZ}
+    command:
+      - "--housekeeping_interval=10s"
+      - "--docker_only=true"
+      - "--logtostderr=true"
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.cadvisor.rule=Host(`cadvisor.${DOMAIN}`)"
+      - "traefik.http.routers.cadvisor.entrypoints=websecure"
+      - "traefik.http.routers.cadvisor.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.cadvisor.middlewares=authelia@docker"
+      - "traefik.http.services.cadvisor.loadbalancer.server.port=8080"
+    # see: https://github.com/google/cadvisor/issues/2150
+    # privileged: true
+    devices:
+      - /dev/kmsg:/dev/kmsg
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:rw
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /dev/disk/:/dev/disk:ro
+
+  blackbox:
+    container_name: blackbox
+    image: prom/blackbox-exporter:v0.19.0
+    restart: unless-stopped
+    command:
+      - "--config.file=/etc/prometheus/blackbox.yml"
+      - "--log.level=debug"
+    networks:
+      - monitoring
+    volumes:
+      - ./prometheus/:/etc/prometheus/
+
+  alertmanager:
+    container_name: alertmanager
+    image: prom/alertmanager:v0.22.0-rc.1
+    restart: unless-stopped
+    command:
+      - "--config.file=/etc/alertmanager/config.yml"
+      - "--storage.path=/alertmanager"
+    volumes:
+      - alertmanager-storage:/alertmanager
+      - ./alertmanager:/etc/alertmanager
+    networks:
+      - traefik
+      - monitoring
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.alertmanager.rule=Host(`alertmanager.${DOMAIN}`)"
+      - "traefik.http.routers.alertmanager.entrypoints=websecure"
+      - "traefik.http.routers.alertmanager.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.alertmanager.middlewares=authelia@docker"
+      - "traefik.http.services.alertmanager.loadbalancer.server.port=9093"
+
+  alertmanager-discord:
+    container_name: alertmanager-discord
+    # amd64 image
+    # image: benjojo/alertmanager-discord
+    # arm64 image (RPi)
+    image: rogerrum/alertmanager-discord:1.0.0
+    environment:
+      - DISCORD_WEBHOOK=${DISCORD_WEBHOOK}
+    networks:
+      - monitoring
+
+  grafana:
+    container_name: grafana
+    image: grafana/grafana:7.5.6
+    restart: unless-stopped
+    user: "${PUID}:${PGID}"
+    depends_on:
+      - prometheus
+    volumes:
+      - grafana-storage:/var/lib/grafana
+      - ./grafana:/etc/grafana
+    networks:
+      - traefik
+      - monitoring
+    environment:
+      - TZ=${TZ}
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_LOG_LEVEL=debug
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.grafana.rule=Host(`grafana.${DOMAIN}`)"
+      - "traefik.http.routers.grafana.entrypoints=websecure"
+      - "traefik.http.routers.grafana.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.grafana.middlewares=authelia@docker"
+      - "traefik.http.services.grafana.loadbalancer.server.port=3000"
+
+  # ========================================================================= #
+  #                                 GHOST BLOG
+  # ========================================================================= #
+
+  ghost:
+    container_name: ghost
+    image: ghost:4-alpine
+    restart: unless-stopped
+    depends_on:
+      - traefik
+      - ghostdb
+    networks:
+      - traefik
+      - ghost
+    environment:
+      - TZ=${TZ}
+      - url="https://blog.${DOMAIN}"
+      - database__client=mysql
+      - database__connection__host=ghostdb
+      - database__connection__database=${GHOSTDB_DB}
+      - database__connection__user=${GHOSTDB_USER}
+      - database__connection__password=${GHOSTDB_PASSWORD}
+    volumes:
+      - ./ghost:/var/lib/ghost/content
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.ghost.rule=Host(`blog.${DOMAIN}`)"
+      - "traefik.http.routers.ghost.entrypoints=websecure"
+      - "traefik.http.routers.ghost.tls.certresolver=letsencrypt"
+      - "traefik.http.services.ghost.loadbalancer.server.port=2368"
+
+  ghostdb:
+    container_name: ghostdb
+    image: mariadb:10.5
+    restart: unless-stopped
+    networks:
+      - ghost
+    environment:
+      - MYSQL_ROOT_PASSWORD=${GHOSTDB_PASSWORD}
+      - MYSQL_USER=${GHOSTDB_USER}
+      - MYSQL_PASSWORD=${GHOSTDB_PASSWORD}
+      - MYSQL_DATABASE=${GHOSTDB_DB}
+    volumes:
+      - ghostdb-storage:/var/lib/mysql
