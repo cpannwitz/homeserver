@@ -124,6 +124,7 @@ services:
       - "traefik.http.services.alertmanager.loadbalancer.server.port=9093"
 
   alertmanager-discord:
+    container_name: alertmanager-discord
     # amd64 image
     # image: benjojo/alertmanager-discord
     # arm64 image (RPi)
