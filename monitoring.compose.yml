@@ -140,7 +140,6 @@ services:
     user: "${PUID}:${PGID}"
     depends_on:
       - prometheus
-      - traefik
     volumes:
       - grafana-storage:/var/lib/grafana
       - ./grafana:/etc/grafana
