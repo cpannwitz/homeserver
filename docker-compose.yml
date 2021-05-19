@@ -51,12 +51,14 @@ services:
       - traefik
     environment:
       - TZ=${TZ}
+    depends_on:
+      - authelia
     command:
       # Enable API + dashboard
       - --api.dashboard=true
       - --api.debug=true
       # Set log level (DEBUG, PANIC, FATAL, ERROR, WARN, INFO)
-      - --log.level=PANIC
+      - --log.level=DEBUG
       # Enable metrics
       - --metrics.prometheus=true
       - --ping=true
@@ -77,7 +79,7 @@ services:
       - --certificatesresolvers.letsencrypt.acme.storage=/certificates/acme.json
       - --certificatesresolvers.letsencrypt.acme.tlschallenge=true
       # Enable LetsEncrypt staging server
-      - --certificatesresolvers.letsencrypt.acme.caserver=https://acme-staging-v02.api.letsencrypt.org/directory
+      # - --certificatesresolvers.letsencrypt.acme.caserver=https://acme-staging-v02.api.letsencrypt.org/directory
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.traefik.rule=Host(`traefik.${DOMAIN}`)"
@@ -197,6 +199,7 @@ services:
     image: zcube/cadvisor:v0.37.5
     restart: unless-stopped
     networks:
+      - traefik
       - monitoring
     environment:
       - TZ=${TZ}
