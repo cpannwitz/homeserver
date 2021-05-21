@@ -79,14 +79,17 @@ services:
       - --certificatesresolvers.letsencrypt.acme.storage=/certificates/acme.json
       - --certificatesresolvers.letsencrypt.acme.tlschallenge=true
       # Enable LetsEncrypt staging server
+      - --providers.providersThrottleDuration=10s
       # - --certificatesresolvers.letsencrypt.acme.caserver=https://acme-staging-v02.api.letsencrypt.org/directory
     labels:
       - "traefik.enable=true"
+      - "traefik.docker.network=traefik"
       - "traefik.http.routers.traefik.rule=Host(`traefik.${DOMAIN}`)"
       - "traefik.http.routers.traefik.entrypoints=websecure"
       - "traefik.http.routers.traefik.tls.certresolver=letsencrypt"
       - "traefik.http.routers.traefik.service=api@internal"
       - "traefik.http.routers.traefik.middlewares=authelia@docker"
+      - "traefik.http.services.traefik.loadbalancer.server.port=8080"
 
   # ========================================================================= #
   #                                 AUTHENTICATION
